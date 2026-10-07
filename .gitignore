@@ -1,6 +1,9 @@
 __pycache__/
 .cache/
 .metaflow/
-# written by obproject-deploy
+# written by obproject-deploy and outerbounds app deploy
 project_spec.json
 .updated_app_configs/
+.ob_apps/
+# Kilo Agent Manager state and worktrees
+.kilo/

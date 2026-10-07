@@ -1,1 +1,0 @@
-{"cb79b76384897cb13f646d3a5fbe9645": {"success": {"bakingStats": null, "containerImage": "fast-bakery.merced.obp.outerbounds.com/default/talented-hummingbird:9y72uthr5k-oci-zstd", "metadata": {"coordinatorImageTag": "v1.32.0-1c32fa0f-1790012696"}, "pythonPath": "/opt/outerbounds/fastbakery/bin/python"}}}

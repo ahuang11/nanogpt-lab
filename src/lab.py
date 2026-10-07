@@ -3,6 +3,7 @@ import argparse
 import itertools
 import json
 import math
+import os
 import re
 import statistics
 import time
@@ -13,8 +14,8 @@ from typing import Any
 from metaflow import Flow, Run, Task, namespace
 
 from config import (
-    DEFAULT_BRANCH, EVENT, INIT_LOSS, MEASUREMENT_FIELDS, PRESETS, UI_URL, Config, changes, config_hash, family_hash,
-    load_text, resolve,
+    DEFAULT_BRANCH, EVENT, INIT_LOSS, MEASUREMENT_FIELDS, PRESETS, UI_URL, Config, changes, code_version, config_hash,
+    family_hash, load_text, resolve,
 )
 
 PROJECT = tomllib.loads((Path(__file__).parents[1] / "obproject.toml").read_text())["project"]
@@ -25,7 +26,8 @@ def _tag(run: Run, key: str) -> str | None:
     return next((t.split(":", 1)[1] for t in run.user_tags if t.startswith(f"{key}:")), None)
 
 
-def find_runs(config_hash: str | None = None, sweep: str | None = None, successful_only: bool = False) -> list[Run]:
+def find_runs(config_hash: str | None = None, sweep: str | None = None, code: str | None = None,
+              successful_only: bool = False) -> list[Run]:
     """TrainFlow runs in this project, newest first, across all users.
 
     Runs without a config tag predate tagging and are left out.
@@ -35,6 +37,8 @@ def find_runs(config_hash: str | None = None, sweep: str | None = None, successf
         tags.append(f"config:{config_hash}")
     if sweep:
         tags.append(f"sweep:{sweep}")
+    if code:
+        tags.append(f"code:{code}")
     namespace(None)
     runs = [r for r in Flow("TrainFlow").runs(*tags) if _tag(r, "config")]
     return [r for r in runs if r.successful] if successful_only else runs
@@ -53,16 +57,17 @@ def run_status(run: Run) -> tuple[str, Task | None]:
 
 def launch(overrides: dict[str, Any] | None = None, label: str = "", sweep: str = "", launched_by: str = "lab",
            branch: str = DEFAULT_BRANCH, frozen: tuple[str, ...] = ()) -> dict[str, Any]:
-    """Ask the deployed TrainFlow on `branch` for one run, unless the config already succeeded or is running.
+    """Ask the deployed TrainFlow on `branch` for one run, unless this config already succeeded or is running on this code.
 
-    Returns {config_hash, launched, existing}, where existing is the run that made this launch unnecessary.
+    "This code" is the local commit, so deploy after committing; with uncommitted changes nothing is skipped.
+    Returns {config_hash, code, launched, existing}, where existing is the run that made this launch unnecessary.
     """
     overrides = dict(overrides or {})
     cfg = resolve(overrides, frozen=frozen)
-    h = config_hash(cfg)
-    for run in find_runs(config_hash=h):
+    h, code = config_hash(cfg), code_version()
+    for run in find_runs(config_hash=h, code=code):
         if run_status(run)[0] in ("succeeded", "running"):
-            return {"config_hash": h, "launched": False, "existing": run.pathspec}
+            return {"config_hash": h, "code": code, "launched": False, "existing": run.pathspec}
     # Deferred: only launching needs obproject, so the compare app and other read-only users don't.
     from obproject import ProjectEvent
 
@@ -72,11 +77,11 @@ def launch(overrides: dict[str, Any] | None = None, label: str = "", sweep: str 
         "sweep": sweep,
         "launched_by": launched_by,
     }, ignore_errors=False)  # the default swallows a failed publish, which would report a launch that never happened
-    return {"config_hash": h, "launched": True, "existing": None}
+    return {"config_hash": h, "code": code, "launched": True, "existing": None}
 
 
 def sweep(name: str, presets: list[str] | None = None, grid: dict[str, list[Any]] | None = None,
-          branch: str = DEFAULT_BRANCH) -> list[dict[str, Any]]:
+          launched_by: str = "lab.sweep", branch: str = DEFAULT_BRANCH) -> list[dict[str, Any]]:
     """Launch presets and/or every combination in a grid as one sweep; with neither, all presets.
 
     Everything is validated before anything is sent.
@@ -93,10 +98,11 @@ def sweep(name: str, presets: list[str] | None = None, grid: dict[str, list[Any]
         requests += [(n, PRESETS[n]) for n in names]
     for _, overrides in requests:
         resolve(overrides)
-    return [launch(o, label=label, sweep=name, launched_by="lab.sweep", branch=branch) for label, o in requests]
+    return [launch(o, label=label, sweep=name, launched_by=launched_by, branch=branch) for label, o in requests]
 
 
-def replicate(config_hash: str, seeds: tuple[int, ...] = (43, 44), branch: str = DEFAULT_BRANCH) -> list[dict[str, Any]]:
+def replicate(config_hash: str, seeds: tuple[int, ...] = (43, 44), launched_by: str = "lab.replicate",
+              branch: str = DEFAULT_BRANCH) -> list[dict[str, Any]]:
     """Rerun a succeeded config with other seeds, into the same sweep.
 
     It's the only way to change the seed from the CLI, so replicates use a fixed,
@@ -108,7 +114,7 @@ def replicate(config_hash: str, seeds: tuple[int, ...] = (43, 44), branch: str =
     start = runs[0]["start"].task.data
     overrides = {k: v for k, v in json.loads(start.overrides).items() if k != "seed"}
     return [launch({**overrides, "seed": s}, label=f"{start.exp_name} seed={s}", sweep=_tag(runs[0], "sweep") or "",
-                   launched_by="lab.replicate", branch=branch) for s in seeds]
+                   launched_by=launched_by, branch=branch) for s in seeds]
 
 
 def error_signature(error: str) -> str:
@@ -173,6 +179,7 @@ def summarize(run: Run, points: int | None = 8) -> dict[str, Any]:
         "url": f"{UI_URL}/{run.pathspec}",
         "status": status,
         "config_hash": _tag(run, "config"),
+        "code": _tag(run, "code"),
         "sweep": _tag(run, "sweep"),
         "launched_by": _tag(run, "launched_by"),
         "age_s": round(time.time() - run.created_at.timestamp()),
@@ -221,8 +228,8 @@ def sweeps() -> list[str]:
 
 
 def curves(sweep: str) -> list[dict[str, Any]]:
-    """Every eval point of every finished run in a sweep, one row each: run, label, iter, losses and lr."""
-    return [{"run": r.pathspec, "label": r.data.exp_name, **point}
+    """Every eval point of every finished run in a sweep, one row each: run, label (with code), iter, losses and lr."""
+    return [{"run": r.pathspec, "label": f"{r.data.exp_name} @{_tag(r, 'code')}", **point}
             for r in find_runs(sweep=sweep, successful_only=True) for point in r.data.history]
 
 
@@ -230,7 +237,7 @@ def _family_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
     losses = [r["final_val_loss"] for r in rows]
     first = rows[0]
     return {
-        "family": first["family"], "label": first["label"], "changes": first["changes"],
+        "family": first["family"], "code": first["code"], "label": first["label"], "changes": first["changes"],
         "overrides": {k: v for k, v in first["overrides"].items() if k != "seed"},
         "n_seeds": len(rows), "seeds": sorted(r["seed"] for r in rows),
         "mean_val_loss": round(statistics.fmean(losses), 4),
@@ -243,7 +250,7 @@ def _family_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def leaderboard(sweep: str | None = None, limit: int | None = None, by_family: bool = False) -> list[dict[str, Any]]:
-    """Healthy succeeded runs, best final val loss first: the latest run per config.
+    """Healthy succeeded runs, best final val loss first: the latest run per config and code version.
 
     by_family=True groups seed replicates and ranks by their mean, with the spread,
     so a lucky seed doesn't look like a better config.
@@ -252,12 +259,12 @@ def leaderboard(sweep: str | None = None, limit: int | None = None, by_family: b
     for run in find_runs(sweep=sweep, successful_only=True):
         s = summarize(run, points=None)
         if s["status"] == "succeeded":
-            latest.setdefault(s["config_hash"], s)  # newest first, so the first one seen wins
+            latest.setdefault((s["config_hash"], s["code"]), s)  # newest first, so the first one seen wins
     rows = sorted(latest.values(), key=lambda r: r["final_val_loss"])
     if by_family:
         groups = {}
         for r in rows:
-            groups.setdefault(r["family"], []).append(r)
+            groups.setdefault((r["family"], r["code"]), []).append(r)
         rows = sorted((_family_row(g) for g in groups.values()), key=lambda r: r["mean_val_loss"])
     return rows[:limit]
 
@@ -314,6 +321,9 @@ def main() -> None:
     rep.add_argument("config_hash")
     rep.add_argument("--seeds", default="43,44")
     rep.add_argument("--branch", default=DEFAULT_BRANCH)
+    for cmd in (s, one, rep):
+        # Tags each run launched_by:<who>; agents set it (e.g. kilo-am) so their runs can be told apart.
+        cmd.add_argument("--launched-by", default=os.environ.get("LAUNCHED_BY", "lab.cli"))
     for name in ("status", "leaderboard"):
         q = sub.add_parser(name)
         q.add_argument("--sweep", default=None)
@@ -327,26 +337,27 @@ def main() -> None:
         return
     if args.cmd == "sweep":
         presets = [n.strip() for n in args.presets.split(",") if n.strip()]
-        _print_links(sweep(args.name, presets, json.loads(args.grid) if args.grid else None, branch=args.branch))
+        _print_links(sweep(args.name, presets, json.loads(args.grid) if args.grid else None,
+                           launched_by=args.launched_by, branch=args.branch))
         return
     if args.cmd == "launch":
         _print_links([launch(json.loads(args.overrides), label=args.label, sweep=args.sweep,
-                             launched_by="lab.cli", branch=args.branch, frozen=MEASUREMENT_FIELDS)])
+                             launched_by=args.launched_by, branch=args.branch, frozen=MEASUREMENT_FIELDS)])
         return
     if args.cmd == "replicate":
         seeds = tuple(int(s) for s in args.seeds.split(",") if s.strip())
-        _print_links(replicate(args.config_hash, seeds, branch=args.branch))
+        _print_links(replicate(args.config_hash, seeds, launched_by=args.launched_by, branch=args.branch))
         return
 
     if args.cmd == "status":
         rows = observe(sweep=args.sweep, limit=args.limit, points=None)
-        cols = ["config_hash", "label", "status", "final_val_loss", "gpu_seconds", "error", "url"]
+        cols = ["config_hash", "code", "label", "status", "final_val_loss", "gpu_seconds", "error", "url"]
     elif args.by_family:
         rows = leaderboard(sweep=args.sweep, limit=args.limit, by_family=True)
-        cols = ["family", "changes", "n_seeds", "mean_val_loss", "std_val_loss", "mean_gpu_seconds"]
+        cols = ["family", "code", "changes", "n_seeds", "mean_val_loss", "std_val_loss", "mean_gpu_seconds"]
     else:
         rows = leaderboard(sweep=args.sweep, limit=args.limit)
-        cols = ["config_hash", "changes", "final_val_loss", "train_val_gap", "gpu_seconds", "flags"]
+        cols = ["config_hash", "code", "changes", "final_val_loss", "train_val_gap", "gpu_seconds", "flags"]
     if args.json:
         print(json.dumps(rows, indent=1, default=str))
     else:

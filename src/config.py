@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import subprocess
 import urllib.request
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
@@ -103,6 +104,23 @@ def load_text(path: Path = DATA_PATH) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
         urllib.request.urlretrieve(DATA_URL, path)
     return path.read_text()
+
+
+def code_version(ctx: Any = None) -> str:
+    """Short git commit of this checkout, with '-dirty' if it has uncommitted changes.
+
+    TrainFlow's `code` parameter defaults to this, so Metaflow evaluates it on the launching
+    machine: at `argo-workflows create` for deployed runs, at `run` for local ones.
+    """
+    root = Path(__file__).parents[1]
+    try:
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True,
+                             text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True,
+                               text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return f"{sha}-dirty" if dirty else sha
 
 
 def _coerce(key: str, value: Any, kind: type) -> int | float:

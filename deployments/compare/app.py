@@ -10,7 +10,7 @@ from lab import curves, observe, sweeps
 pn.extension("tabulator", throttled=True, loading_indicator=True, sizing_mode="stretch_width")
 pn.widgets.Tabulator.param.theme.default = "materialize"
 
-COLUMNS = ["label", "status", "final_val_loss", "train_val_gap", "flags", "gpu_seconds", "error", "run"]
+COLUMNS = ["label", "code", "status", "final_val_loss", "train_val_gap", "flags", "gpu_seconds", "error", "run"]
 PLOT_HEIGHT = 320
 
 

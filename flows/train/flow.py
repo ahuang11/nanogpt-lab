@@ -9,7 +9,7 @@ from metaflow import IncludeFile, Parameter, Run, card, current, kubernetes, pyp
 from metaflow.cards import Markdown, ProgressBar, VegaChart
 from obproject import ProjectFlow, project_trigger
 
-from config import DATA_PATH, EVENT, Config, changes, config_hash, resolve
+from config import DATA_PATH, EVENT, Config, changes, code_version, config_hash, resolve
 
 # On a shared queue, extra GPU tasks can be placed on pools that never schedule them,
 # so the train step is pinned to one GPU-only pool. Other steps use the default pool.
@@ -23,6 +23,8 @@ class TrainFlow(ProjectFlow):
     label = Parameter("label", default="", help="human label; defaults to the changed knobs")
     sweep = Parameter("sweep", default="", help="batch this run belongs to")
     launched_by = Parameter("launched_by", default="manual", help="person, script or agent launching it")
+    # Same config on different code is a different experiment, so runs carry the commit they ran.
+    code = Parameter("code", default=code_version, help="git commit of the code this run uses")
     # An absolute path, since obproject-deploy runs this file from flows/train/, not the repo root.
     corpus = IncludeFile("corpus", default=str(DATA_PATH), help="Tiny Shakespeare, uploaded at launch")
 
@@ -35,7 +37,8 @@ class TrainFlow(ProjectFlow):
         self.exp_name = self.label or self.changes
         self.estimated_params = cfg.n_params
 
-        tags = [f"label:{self.exp_name}", f"config:{self.config_hash}", f"launched_by:{self.launched_by}"]
+        tags = [f"label:{self.exp_name}", f"config:{self.config_hash}", f"code:{self.code}",
+                f"launched_by:{self.launched_by}"]
         if self.sweep:
             tags.append(f"sweep:{self.sweep}")
         Run(f"{current.flow_name}/{current.run_id}").add_tags(tags)
@@ -57,7 +60,8 @@ class TrainFlow(ProjectFlow):
         progress = ProgressBar(max=cfg.max_iters, label="iterations")
         loss_chart = VegaChart(line_spec([], "loss", "loss", color="split"))
         lr_chart = VegaChart(line_spec([], "lr", "learning rate"))
-        header = f"# {self.exp_name}\n**changes:** {self.changes} · **config** `{self.config_hash}` · **launched by** {self.launched_by}"
+        header = (f"# {self.exp_name}\n**changes:** {self.changes} · **config** `{self.config_hash}`"
+                  f" · **code** `{self.code}` · **launched by** {self.launched_by}")
         if self.sweep:
             header += f" · **sweep** {self.sweep}"
         live.extend([Markdown(header), progress, loss_chart, lr_chart])

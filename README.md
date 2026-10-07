@@ -39,7 +39,7 @@ flowchart TD
     board -. "decide what to try next" .-> you
 ```
 
-`lab.py` never calls the training code directly. It publishes an event for each experiment and the platform starts a TrainFlow run from it, which means runs keep going after your laptop closes and nothing that launches experiments needs access to the training code. Every run checks its settings on a CPU machine before it asks for a GPU, and is tagged with its label and a hash of its full config, which is how repeats are skipped and how results are grouped.
+`lab.py` never calls the training code directly. It publishes an event for each experiment and the platform starts a TrainFlow run from it, which means runs keep going after your laptop closes and nothing that launches experiments needs access to the training code. Every run checks its settings on a CPU machine before it asks for a GPU, and is tagged with its label, a hash of its full config and the git commit of its code, which is how repeats are skipped and how results are grouped.
 
 ## Adding an experiment
 
@@ -56,7 +56,7 @@ python src/lab.py launch '{"lr": 2e-3, "dropout": 0.2}' --sweep oct07
 python src/lab.py sweep lr-scan --grid '{"lr": [1e-4, 3e-4, 1e-3, 3e-3]}'
 ```
 
-Every launch is checked against the limits in `src/config.py` before anything starts, and a typo like `{"n_layer": 600}` fails immediately on your machine. Experiments that already succeeded or are still running are skipped, which means rerunning a sweep starts only what's new or what failed. Changing the baseline itself gives every experiment a new config hash, and they all run again rather than mixing with the old results.
+Every launch is checked against the limits in `src/config.py` before anything starts, and a typo like `{"n_layer": 600}` fails immediately on your machine. Experiments that already succeeded or are still running on the same code are skipped, which means rerunning a sweep starts only what's new or what failed. Every run is tagged with the git commit it ran, and the same config on a new commit counts as a new experiment, so after a code change and a redeploy everything runs again. Changing the baseline itself gives every experiment a new config hash, with the same effect.
 
 A sweep is only a label. It groups experiments for `status`, `leaderboard` and the compare app, and you can add to an existing sweep at any time.
 

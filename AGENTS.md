@@ -28,4 +28,4 @@ Read `README.md` first; it explains the workflow and the files. This file adds o
 
 - Edit `LIMITS`, `MEASUREMENT_FIELDS` or `resolve()` in `src/config.py`. They are the guardrails for every launch, and changes to them need human review.
 - Relaunch something that is running or has succeeded; `lab.py` skips those, so a `skipped` line is expected.
-- Commit `data/`.
+- Commit `.cache/`.

@@ -15,7 +15,8 @@ from typing import Any
 METAFLOW_PACKAGE_POLICY = "include"
 
 DATA_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-DATA_PATH = Path(__file__).parents[1] / "data" / "input.txt"
+# Not data/: obproject-deploy treats every entry in a top-level data/ folder as a registered data asset.
+DATA_PATH = Path(__file__).parents[1] / ".cache" / "tiny_shakespeare.txt"
 # Must match the data: parameter counts and INIT_LOSS are computed from it without loading the text.
 VOCAB_SIZE = 65
 INIT_LOSS = math.log(VOCAB_SIZE)  # a run that ends at or above this learned nothing
@@ -97,7 +98,7 @@ class Config:
 
 
 def load_text(path: Path = DATA_PATH) -> str:
-    """Tiny Shakespeare, downloaded once to data/input.txt."""
+    """Tiny Shakespeare, downloaded once to DATA_PATH."""
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         urllib.request.urlretrieve(DATA_URL, path)

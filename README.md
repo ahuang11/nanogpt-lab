@@ -95,13 +95,13 @@ requirements.txt            what the deployed app needs; flow steps install thei
 AGENTS.md                   the workflow and rules for coding agents
 ```
 
-This is the layout `obproject-deploy` expects: it deploys every `flows/*/flow.py` and `deployments/*/config.yaml`, and puts `src/` on the import path. `data/` (the downloaded text) is created on first use and not committed.
+This is the layout `obproject-deploy` expects: it deploys every `flows/*/flow.py` and `deployments/*/config.yaml`, and puts `src/` on the import path. The training text is cached in `.cache/` on first use and not committed; it can't live in `data/`, which `obproject-deploy` reserves for registered data assets.
 
 ## `lab.py` reference
 
 | command | does |
 |---|---|
-| `setup` | Downloads the training text to `data/input.txt`. |
+| `setup` | Downloads the training text to `.cache/tiny_shakespeare.txt`. |
 | `sweep NAME [--presets a,b] [--grid JSON] [--branch B]` | Launches presets and/or every combination in a grid, tagged `sweep:NAME`. With neither option, launches all presets. |
 | `launch [JSON] [--sweep S] [--label L] [--branch B]` | Launches one config, given as overrides on the baseline. Seed and measurement fields can't be set. |
 | `replicate HASH [--seeds 43,44] [--branch B]` | Reruns a succeeded config with other seeds, into the same sweep. |

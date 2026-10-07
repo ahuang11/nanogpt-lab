@@ -1,5 +1,5 @@
 __pycache__/
-data/
+.cache/
 .metaflow/
 # written by obproject-deploy
 project_spec.json

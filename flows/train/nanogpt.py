@@ -13,6 +13,8 @@ from torch.nn import functional as F
 
 from config import PRESETS, Config, load_text, resolve
 
+PATIENCE = 3  # stop once val loss has risen this many evals in a row
+
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, cfg: Config) -> None:
@@ -144,8 +146,10 @@ def train(cfg: Config, on_eval: Callable[[dict[str, float]], None] | None = None
           text: str | None = None) -> dict[str, Any]:
     """Train one config. on_eval(record) fires at every eval; text skips the download.
 
-    Returns {model, chars, n_params, history, device}; each history record has
-    iter, lr, train_loss, val_loss and elapsed_s.
+    Returns {model, chars, n_params, history, device, stopped_iter, early_stopped}; each
+    history record has iter, lr, train_loss, val_loss and elapsed_s. Training stops early
+    once val loss has risen for PATIENCE evals in a row; stopped_iter is the iteration
+    training ended at (max_iters if it ran to completion).
     """
     device = device or default_device()
     torch.manual_seed(cfg.seed)
@@ -171,13 +175,23 @@ def train(cfg: Config, on_eval: Callable[[dict[str, float]], None] | None = None
         if on_eval is not None:
             on_eval(record)
 
+    def val_rising() -> bool:
+        """True once val loss has risen at each of the last PATIENCE evals."""
+        vals = [r["val_loss"] for r in history[-(PATIENCE + 1):]]
+        return len(vals) == PATIENCE + 1 and all(b > a for a, b in zip(vals, vals[1:]))
+
     lr = cfg.lr
+    stopped_iter, early_stopped = cfg.max_iters, False
     for it in range(cfg.max_iters):
         lr = lr_at(it, cfg)
         for group in optimizer.param_groups:
             group["lr"] = lr
         if it % cfg.eval_interval == 0:
             evaluate(it, lr)
+            if val_rising():
+                stopped_iter, early_stopped = it, True
+                print(f"early stop at iter {it}: val loss rose for {PATIENCE} evals in a row")
+                break
         x, y = get_batch(splits["train"], cfg, device)
         _, loss = model(x, y)
         optimizer.zero_grad(set_to_none=True)
@@ -185,8 +199,11 @@ def train(cfg: Config, on_eval: Callable[[dict[str, float]], None] | None = None
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
         optimizer.step()
 
-    evaluate(cfg.max_iters, lr)
-    return {"model": model, "chars": chars, "n_params": n_params, "history": history, "device": device}
+    if not early_stopped:
+        evaluate(cfg.max_iters, lr)
+    print(f"stopped_iter {stopped_iter} (early_stopped={early_stopped})")
+    return {"model": model, "chars": chars, "n_params": n_params, "history": history, "device": device,
+            "stopped_iter": stopped_iter, "early_stopped": early_stopped}
 
 
 def main() -> None:

@@ -14,6 +14,26 @@ from torch.nn import functional as F
 from config import PRESETS, Config, load_text, resolve
 
 
+class Rotary(nn.Module):
+    """Rotary position embedding (RoPE): rotates each (even, odd) pair of q/k channels by a position-dependent angle."""
+
+    def __init__(self, head_dim: int, max_len: int, base: float = 10000.0) -> None:
+        super().__init__()
+        assert head_dim % 2 == 0, f"RoPE needs an even head dim, got {head_dim}"
+        inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))
+        angles = torch.outer(torch.arange(max_len, dtype=torch.float32), inv_freq)  # (max_len, head_dim/2)
+        # buffers, not parameters: no weights to learn, and kept out of the state dict
+        self.register_buffer("cos", angles.cos(), persistent=False)
+        self.register_buffer("sin", angles.sin(), persistent=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x is (B, n_head, T, head_dim)."""
+        T = x.size(-2)
+        cos, sin = self.cos[:T].to(x.dtype), self.sin[:T].to(x.dtype)
+        x1, x2 = x[..., 0::2], x[..., 1::2]
+        return torch.stack((x1 * cos - x2 * sin, x1 * sin + x2 * cos), dim=-1).flatten(-2)
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, cfg: Config) -> None:
         super().__init__()
@@ -23,11 +43,13 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd)
         self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd)
         self.resid_dropout = nn.Dropout(cfg.dropout)
+        self.rotary = Rotary(cfg.n_embd // cfg.n_head, cfg.block_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.shape
         q, k, v = self.c_attn(x).split(C, dim=2)
         q, k, v = (t.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) for t in (q, k, v))
+        q, k = self.rotary(q), self.rotary(k)
         y = F.scaled_dot_product_attention(
             q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0.0
         )
@@ -63,8 +85,7 @@ class GPT(nn.Module):
     def __init__(self, cfg: Config, vocab_size: int) -> None:
         super().__init__()
         self.block_size = cfg.block_size
-        self.wte = nn.Embedding(vocab_size, cfg.n_embd)
-        self.wpe = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.wte = nn.Embedding(vocab_size, cfg.n_embd)  # positions come from RoPE in attention, not a learned table
         self.drop = nn.Dropout(cfg.dropout)
         self.blocks = nn.ModuleList(Block(cfg) for _ in range(cfg.n_layer))
         self.ln_f = nn.LayerNorm(cfg.n_embd)
@@ -79,9 +100,7 @@ class GPT(nn.Module):
             nn.init.zeros_(module.bias)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor | None]:
-        _, T = idx.shape
-        pos = torch.arange(T, device=idx.device)
-        x = self.drop(self.wte(idx) + self.wpe(pos))
+        x = self.drop(self.wte(idx))
         for block in self.blocks:
             x = block(x)
         logits = self.lm_head(self.ln_f(x))

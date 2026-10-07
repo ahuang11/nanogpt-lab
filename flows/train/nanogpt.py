@@ -68,7 +68,8 @@ class GPT(nn.Module):
         self.drop = nn.Dropout(cfg.dropout)
         self.blocks = nn.ModuleList(Block(cfg) for _ in range(cfg.n_layer))
         self.ln_f = nn.LayerNorm(cfg.n_embd)
-        self.lm_head = nn.Linear(128, vocab_size, bias=False)
+        self.lm_head = nn.Linear(cfg.n_embd, vocab_size, bias=False)
+        self.lm_head.weight = self.wte.weight  # weight tying, as in GPT-2
         self.apply(self._init_weights)
 
     @staticmethod

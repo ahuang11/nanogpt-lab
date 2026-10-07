@@ -1,0 +1,10 @@
+project = "ob_train"
+title = "ob_train: parallel char-level GPT experiments"
+# Used by obproject-deploy to build links as https://ui.<platform>/...
+platform = "merced.obp.outerbounds.com"
+
+# Without a git branch in the deployment spec, @project_trigger falls back to this:
+# TrainFlow listens for prj.ob_train.main.train_request, which is what lab.launch()
+# publishes by default (DEFAULT_BRANCH in src/config.py).
+[dev-assets]
+branch = "main"

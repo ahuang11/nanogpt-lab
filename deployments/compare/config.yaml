@@ -1,0 +1,20 @@
+# Commands run from the repo root; obproject-deploy puts . and ./src on PYTHONPATH, which is how `import lab` resolves.
+name: ob-train-compare
+port: 8000
+image: python:3.11-trixie
+cpu: 1
+memory: 2048
+min_replicas: 1
+max_replicas: 1
+public_access: false
+description: "Compare a sweep's TrainFlow runs, with loss curves overlaid"
+# Required on every deployment; ones without an owner tag are deleted weekly.
+tags:
+  - team:fde
+  - owner:ahuang@anaconda.com
+
+env:
+  METAFLOW_DEFAULT_METADATA: service
+
+commands:
+- python -m panel serve deployments/compare/app.py --port 8000 --address 0.0.0.0 --allow-websocket-origin="*"

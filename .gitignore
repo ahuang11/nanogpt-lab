@@ -1,0 +1,6 @@
+__pycache__/
+data/
+.metaflow/
+# written by obproject-deploy
+project_spec.json
+.updated_app_configs/

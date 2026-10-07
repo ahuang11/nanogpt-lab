@@ -1,0 +1,8 @@
+# What the deployed compare app imports. TrainFlow's steps install their own packages via @pypi.
+panel
+panel-material-ui
+hvplot
+pandas
+param
+metaflow
+outerbounds

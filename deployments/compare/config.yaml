@@ -10,8 +10,8 @@ public_access: false
 description: "Compare a sweep's TrainFlow runs, with loss curves overlaid"
 # Required on every deployment; ones without an owner tag are deleted weekly.
 tags:
-  - team:fde
-  - owner:ahuang@anaconda.com
+  - team: fde
+  - owner: ahuang@anaconda.com
 
 env:
   METAFLOW_DEFAULT_METADATA: service
